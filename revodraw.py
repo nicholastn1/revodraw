@@ -440,6 +440,7 @@ HTML_TEMPLATE = '''
                             <option value="edges">Edges (photos)</option>
                             <option value="contours">Contours (logos)</option>
                             <option value="contours_inv">Contours Inverted</option>
+                            <option value="centerline">Centerline (line art, thin)</option>
                             <option value="adaptive">Adaptive</option>
                         </select>
                     </div>
@@ -2105,8 +2106,60 @@ def process_image():
         return jsonify({'error': str(e)})
 
 
+_NEIGHBORS = [(-1, 0), (1, 0), (0, -1), (0, 1), (-1, -1), (-1, 1), (1, -1), (1, 1)]  # 4-neighbors first
+
+
+def trace_skeleton(skel):
+    """Walk a 1px skeleton into polylines, each pixel visited once (no double strokes)."""
+    h, w = skel.shape
+    on = {(int(y), int(x)) for y, x in zip(*np.nonzero(skel))}
+    nbrs = lambda p: [(p[0] + dy, p[1] + dx) for dy, dx in _NEIGHBORS if (p[0] + dy, p[1] + dx) in on]
+    visited = set()
+    paths = []
+
+    def walk(start):
+        path = [start]
+        # bridge back to an already-drawn neighbor so branches stay connected at junctions
+        joined = [n for n in nbrs(start) if n in visited]
+        if joined:
+            path.insert(0, joined[0])
+        visited.add(start)
+        cur = start
+        while True:
+            nxt = [n for n in nbrs(cur) if n not in visited]
+            if not nxt:
+                return path
+            cur = nxt[0]
+            visited.add(cur)
+            path.append(cur)
+
+    # endpoints first so open lines are drawn end to end; leftovers are loops/branches
+    for p in sorted(on, key=lambda p: len(nbrs(p)) != 1):
+        if p not in visited:
+            paths.append(walk(p))
+    return paths
+
+
+def extract_centerline(img, threshold, simplify):
+    from skimage.morphology import skeletonize
+    _, binary = cv2.threshold(img, threshold, 255, cv2.THRESH_BINARY_INV)
+    paths = []
+    for pix in trace_skeleton(skeletonize(binary > 0)):
+        if len(pix) < 4:  # specks
+            continue
+        pts = np.array([[x, y] for y, x in pix], np.int32).reshape(-1, 1, 2)
+        if simplify > 0:
+            pts = cv2.approxPolyDP(pts, simplify, False)
+        path = [[int(p[0][0]), int(p[0][1])] for p in pts]
+        if len(path) >= 2:
+            paths.append(path)
+    return paths
+
+
 def extract_paths(img, method, threshold, simplify, fill=False, spacing=4):
     """Extract drawable paths from image."""
+    if method == 'centerline':
+        return extract_centerline(img, threshold, simplify)
     if method == 'auto':
         std_dev = np.std(img)
         method = 'contours' if std_dev > 70 else 'edges'

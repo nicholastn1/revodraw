@@ -3,4 +3,5 @@ numpy>=1.24.0
 Pillow>=10.0.0
 svgpathtools>=1.6.0
 flask>=3.0.0
+scikit-image>=0.22  # centerline method
 pyobjc-framework-Quartz; sys_platform == "darwin"  # iPhone mode only
