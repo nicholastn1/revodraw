@@ -26,7 +26,9 @@ import cv2
 import numpy as np
 from flask import Flask, render_template_string, request, jsonify, send_file
 
-from detect_drawing_area import detect_from_screenshot, capture_screenshot, DrawingArea, get_adb_path
+from detect_drawing_area import detect_from_screenshot, capture_screenshot, DrawingArea, get_adb_path, IPHONE
+if IPHONE:
+    import iphone_mirror
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload
@@ -421,8 +423,9 @@ HTML_TEMPLATE = '''
         <div class="panels">
             <div class="panel">
                 <h2>1. Upload Images</h2>
+                <!-- input lives outside dropZone: handleFile() rewrites dropZone's innerHTML -->
+                <input type="file" id="imageInput" accept="image/*" style="display:none">
                 <div id="dropZone">
-                    <input type="file" id="imageInput" accept="image/*">
                     <p>📁 Drop image here or click to upload</p>
                 </div>
                 <div id="layerList" style="margin-top:10px;"></div>
@@ -534,6 +537,13 @@ HTML_TEMPLATE = '''
                     <input type="file" id="screenshotInput" accept="image/*" style="display:none"
                         onchange="detectAreaFromFile(this.files[0])">
                     <button class="btn" onclick="document.getElementById('screenshotInput').click()">📂 Load Screenshot</button>
+                </div>
+                <div class="controls">
+                    <label><input type="checkbox" id="showScreenshot" checked onchange="updatePreview()"> Show phone screenshot</label>
+                    <div class="control-group">
+                        <label>Opacity:</label>
+                        <input type="range" id="screenshotOpacity" min="0" max="100" value="35" oninput="updatePreview()">
+                    </div>
                 </div>
                 <div id="areaStatus" class="status info">Click "Detect Area" to capture phone screen, or load a screenshot manually</div>
             </div>
@@ -676,6 +686,7 @@ HTML_TEMPLATE = '''
         let processedPaths = null;
         let pathsHistory = [];  // For undo
         let drawingArea = null;
+        let screenshotImg = null;  // last detected phone screenshot, drawn behind the preview
         let isDragging = false;
         let dragStart = {x: 0, y: 0};
         let imageOffset = {x: 0, y: 0};
@@ -712,7 +723,10 @@ HTML_TEMPLATE = '''
             dropZone.classList.remove('dragover');
             if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
         };
-        imageInput.onchange = () => { if (imageInput.files.length) handleFile(imageInput.files[0]); };
+        imageInput.onchange = () => {
+            if (imageInput.files.length) handleFile(imageInput.files[0]);
+            imageInput.value = '';  // allow picking the same file again
+        };
 
         let currentFileName = '';
 
@@ -1280,11 +1294,7 @@ HTML_TEMPLATE = '''
 
                 // Reset for next image
                 originalImage = null;
-                dropZone.innerHTML = '<input type="file" id="imageInput" accept="image/*"><p>📁 Drop image here or click to upload</p>';
-                document.getElementById('imageInput').onchange = () => {
-                    if (document.getElementById('imageInput').files.length)
-                        handleFile(document.getElementById('imageInput').files[0]);
-                };
+                dropZone.innerHTML = '<p>📁 Drop image here or click to upload</p>';
 
                 updatePreview();
                 updateDrawButton();
@@ -1344,6 +1354,9 @@ HTML_TEMPLATE = '''
                 `Area detected: ${data.area.right - data.area.left}x${data.area.bottom - data.area.top}px`;
             document.getElementById('areaStatus').className = 'status success';
             log('Drawing area detected successfully');
+            const img = new Image();
+            img.onload = () => { screenshotImg = img; updatePreview(); };
+            img.src = '/screenshot?t=' + Date.now();
             updatePreview();
             updateDrawButton();
         }
@@ -1373,6 +1386,14 @@ HTML_TEMPLATE = '''
             // Transform function
             const tx = (x) => offsetX + (x - area.left) * previewScale;
             const ty = (y) => offsetY + (y - area.top) * previewScale;
+
+            // Phone screenshot behind everything, in the same coordinate space
+            if (screenshotImg && document.getElementById('showScreenshot').checked) {
+                ctx.globalAlpha = document.getElementById('screenshotOpacity').value / 100;
+                ctx.drawImage(screenshotImg, tx(0), ty(0),
+                              screenshotImg.width * previewScale, screenshotImg.height * previewScale);
+                ctx.globalAlpha = 1;
+            }
 
             // Draw drawing area boundary
             ctx.strokeStyle = '#333';
@@ -2180,6 +2201,12 @@ def detect_area():
         return jsonify({'error': str(e)})
 
 
+@app.route('/screenshot')
+def screenshot():
+    """Last screenshot used for detection (both /detect and /detect-from-file write screen.png)."""
+    return send_file(os.path.abspath('screen.png'), mimetype='image/png', max_age=0)
+
+
 @app.route('/detect-from-file', methods=['POST'])
 def detect_area_from_file():
     """Detect drawing area from an uploaded screenshot."""
@@ -2314,9 +2341,19 @@ def draw():
             total_points = sum(len(p) for p in scaled_paths)
 
             yield f"data:{json.dumps({'message': f'Drawing {total_paths} paths ({total_points} points)...'})}\n\n"
+            if IPHONE:
+                iphone_mirror.activate()  # bring the mirror window to front so drags land on it
 
             for i, path in enumerate(scaled_paths):
-                for j in range(len(path) - 1):
+                if IPHONE:
+                    if not STATE.get('drawing', True):
+                        yield f"data:{json.dumps({'message': 'Stopped', 'done': True})}\n\n"
+                        return
+                    while STATE.get('paused', False) and STATE.get('drawing', True):
+                        time.sleep(0.1)
+                    iphone_mirror.draw_path(path, stroke_duration)
+                    time.sleep(stroke_delay)
+                for j in range(len(path) - 1 if not IPHONE else 0):
                     # Pause support: poll state until resumed
                     if STATE.get('paused', False):
                         yield f"data:{json.dumps({'message': 'Paused...'})}\n\n"

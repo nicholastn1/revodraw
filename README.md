@@ -86,6 +86,24 @@ python image_draw.py photo.jpg --method edges
 python image_draw.py drawing.png --preview  # Preview without drawing
 ```
 
+## iPhone (macOS only)
+
+No ADB on iOS, so iPhone mode drives the macOS **iPhone Mirroring** window instead: it screenshots the window and draws with synthesized mouse drags.
+
+1. Open the **iPhone Mirroring** app (macOS 15+) until your iPhone screen shows up.
+2. Give your terminal **Accessibility** and **Screen Recording** permission (System Settings → Privacy & Security).
+3. Open Revolut → customise card → Draw, then run:
+
+```bash
+REVODRAW_IPHONE=1 python revodraw.py -p 5050   # port 5000 is taken by AirPlay on macOS
+```
+
+Notes:
+- Don't touch the mouse while it draws (it uses the real cursor).
+- The iOS drawing area is taken from the measured iPhone layout (the dotted lines are too faint to detect). If Revolut changes the screen, re-measure the ratios in `detect_drawing_area.py`.
+- Knobs in `iphone_mirror.py`: raise `TOUCH_HOLD` if stroke starts get cut, `DRAG_STEPS` if lines come out dotted.
+- Brush thickness is Revolut's own slider (right side of the card), not RevoDraw's.
+
 ## How It Works
 
 1. **Screenshot capture** - Takes a screenshot via ADB (or loads a manually provided screenshot)

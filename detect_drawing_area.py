@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Optional, Tuple, List
 import subprocess
 import shutil
+import os
 import sys
 import math
 
@@ -110,8 +111,14 @@ class DrawingArea:
         )
 
 
+IPHONE = os.environ.get('REVODRAW_IPHONE') == '1'
+
+
 def capture_screenshot(output_path: str = "screen.png") -> str:
-    """Capture screenshot via ADB."""
+    """Capture screenshot via ADB (or iPhone Mirroring when REVODRAW_IPHONE=1)."""
+    if IPHONE:
+        import iphone_mirror
+        return iphone_mirror.capture_screenshot(output_path)
     print(f"Capturing screenshot to {output_path}...")
     result = subprocess.run([get_adb_path(), '-d', 'exec-out', 'screencap', '-p'], capture_output=True)
     if result.returncode != 0:
@@ -162,8 +169,7 @@ def detect_lines(bright_mask: np.ndarray, card_w: int, card_h: int) -> Tuple[Lis
     v_lines = []
 
     if lines is not None:
-        for line in lines:
-            x1, y1, x2, y2 = line[0]
+        for x1, y1, x2, y2 in lines.reshape(-1, 4):  # shape varies across OpenCV versions
             dx = abs(x2 - x1)
             dy = abs(y2 - y1)
             length = math.sqrt(dx*dx + dy*dy)
@@ -289,6 +295,15 @@ def detect_boundary(image: np.ndarray, debug: bool = False) -> Optional[DrawingA
 
     visa_top = visa_top if visa_top is not None else int(card_h * 0.58)
     visa_left = visa_left if visa_left is not None else int(card_w * 0.60)
+
+    if IPHONE:
+        # ponytail: iOS dotted lines are faint gray-on-gray and the "evolut" text swamps the
+        # Hough pass, so use the layout measured on iPhone (card is cropped on the left, ratios
+        # are of the visible card). Re-measure if Revolut changes the screen or on another model.
+        top, bottom = int(card_h * 0.059), int(card_h * 0.97)
+        left, right = int(card_w * 0.147), int(card_w * 0.928)
+        top_excl_right, top_excl_bottom = int(card_w * 0.281), int(card_h * 0.240)
+        visa_left, visa_top = int(card_w * 0.611), int(card_h * 0.688)
 
     print(f"Detected boundaries:")
     print(f"  Outer: top={top}, bottom={bottom}, left={left}, right={right}")
