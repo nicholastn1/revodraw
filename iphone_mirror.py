@@ -4,6 +4,7 @@ Coordinates everywhere else in RevoDraw are screenshot pixels; here we map them
 to screen points using the window bounds, then synthesize mouse drags.
 Requires: Accessibility + Screen Recording permission for your terminal app.
 """
+import math
 import subprocess
 import time
 
@@ -11,8 +12,12 @@ import Quartz
 from PIL import Image
 
 APP_NAME = "iPhone Mirroring"
-DRAG_STEPS = 8  # mouse-dragged events per segment; raise if lines come out dotted
-TOUCH_HOLD = 0.08  # seconds to rest after touch-down before moving; raise if stroke starts get cut
+TOUCH_HOLD = 0.08  # seconds to rest after touch-down before moving
+STEP_PX = 2.0      # screen points per drag event
+EVENT_DT = 0.02    # seconds between drag events; lower = faster but Mirroring starts dropping strokes
+END_HOLD = 0.05    # rest before lift-off so the stroke's end registers
+DOT_R = 1.5        # radius of the micro-circle that draws a dot
+PREROLL_EVENTS = 4 # 1pt jiggle events at stroke start to absorb iOS drag-recognition latency
 
 _last = {}  # window bounds + image size from the latest screenshot
 
@@ -61,24 +66,51 @@ def _post(kind, x, y):
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)
 
 
-def draw_path(points, segment_ms=60):
-    """One continuous touch through all points. iOS drops the start of short
-    separate swipes (touch slop), so unlike ADB we never lift mid-path."""
-    pts = [_to_screen(x, y) for x, y in points]
-    dt = max(segment_ms, 1) / 1000 / DRAG_STEPS
-    _post(Quartz.kCGEventLeftMouseDown, *pts[0])
+def _drag(pts):
+    """Constant-speed touch through screen points. Calibrated on a real iPhone:
+    - Mirroring drops movement sent faster than ~one event per 20ms (strokes short/missing)
+    - iOS discards the first ~40ms of movement while it recognizes the drag, so strokes
+      under ~8pt vanished and dots came out as half circles: a 1pt jiggle along the
+      stroke direction eats that window without drawing anything visible
+    - the end needs a beat before lift-off or the last bit is lost"""
+    (ax, ay), (bx, by) = pts[0], next((p for p in pts if p != pts[0]), (pts[0][0] + 1, pts[0][1]))
+    d = math.hypot(bx - ax, by - ay)
+    ux, uy = (bx - ax) / d, (by - ay) / d
+    _post(Quartz.kCGEventLeftMouseDown, ax, ay)
     time.sleep(TOUCH_HOLD)
+    for i in range(PREROLL_EVENTS):
+        k = 1.0 if i % 2 == 0 else 0.0
+        _post(Quartz.kCGEventLeftMouseDragged, ax + ux * k, ay + uy * k)
+        time.sleep(EVENT_DT)
     for (ax, ay), (bx, by) in zip(pts, pts[1:]):
-        for i in range(1, DRAG_STEPS + 1):
-            t = i / DRAG_STEPS
+        steps = max(1, math.ceil(math.hypot(bx - ax, by - ay) / STEP_PX))
+        for i in range(1, steps + 1):
+            t = i / steps
             _post(Quartz.kCGEventLeftMouseDragged, ax + (bx - ax) * t, ay + (by - ay) * t)
-            time.sleep(dt)
+            time.sleep(EVENT_DT)
+    time.sleep(END_HOLD)
     _post(Quartz.kCGEventLeftMouseUp, *pts[-1])
 
 
+def draw_path(points, segment_ms=None):
+    """One continuous touch through all points (never lifts mid-path, unlike ADB swipes).
+    segment_ms is ignored: speed is fixed by STEP_PX/EVENT_DT, which is what iOS needs."""
+    pts = [_to_screen(x, y) for x, y in points]
+    if all(p == pts[0] for p in pts):  # a dot: a stationary tap draws nothing, a tiny circle does
+        cx, cy = pts[0]
+        pts = [(cx + DOT_R * math.cos(a * math.pi / 3), cy + DOT_R * math.sin(a * math.pi / 3)) for a in range(7)]
+    _drag(pts)
+
+
 def swipe(x1, y1, x2, y2, duration_ms):
-    """Same contract as `adb shell input swipe` (also works as a tap)."""
-    draw_path([(x1, y1), (x2, y2)], duration_ms)
+    """Same contract as `adb shell input swipe`; equal points are a plain tap (UI buttons)."""
+    if (x1, y1) == (x2, y2):
+        sx, sy = _to_screen(x1, y1)
+        _post(Quartz.kCGEventLeftMouseDown, sx, sy)
+        time.sleep(max(duration_ms, 30) / 1000)
+        _post(Quartz.kCGEventLeftMouseUp, sx, sy)
+    else:
+        _drag([_to_screen(x1, y1), _to_screen(x2, y2)])
 
 
 if __name__ == '__main__':
