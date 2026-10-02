@@ -217,6 +217,13 @@ def detect_iphone_layout(card_gray, card_w, card_h):
     white-threshold Hough pass misses. Find the dots as tiny local-contrast specks (text
     strokes are bigger blobs) and read the lines off row/column histograms.
     Handles both layouts seen so far: top-left logo notch, or whole top band excluded."""
+    rows, cols = iphone_dot_lines(card_gray, card_w, card_h)
+    bottom = int(card_h * 0.97)  # no dotted bottom line; boundary is the card edge
+    return _layout_from_lines(rows, cols, card_w, card_h, bottom)
+
+
+def iphone_dot_lines(card_gray, card_w, card_h):
+    """Row/column positions of the faint dotted boundary lines (see detect_iphone_layout)."""
     sc = card_w / 306  # thresholds below were tuned on a 1x mirror window (card ~306px wide)
     k = int(15 * sc) | 1
     diff = card_gray.astype(np.int16) - cv2.medianBlur(card_gray, k).astype(np.int16)
@@ -230,7 +237,10 @@ def detect_iphone_layout(card_gray, card_w, card_h):
     h1, w1 = int(card_h / sc) + 1, int(card_w / sc) + 1
     rows = [int(y * sc) for y, c in enumerate(np.bincount([int(round(d[1])) for d in dots], minlength=h1)) if c >= 5]
     cols = [int(x * sc) for x, c in enumerate(np.bincount([int(round(d[0])) for d in dots], minlength=w1)) if c >= 5]
-    bottom = int(card_h * 0.97)  # no dotted bottom line; boundary is the card edge
+    return rows, cols
+
+
+def _layout_from_lines(rows, cols, card_w, card_h, bottom):
     if len([y for y in rows if y <= card_h * 0.9]) < 2 or len(cols) < 3:
         print("Warning: iPhone dotted lines not found, using measured fallback ratios")
         return (int(card_h * 0.059), bottom, int(card_w * 0.147), int(card_w * 0.928),

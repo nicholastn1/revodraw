@@ -62,6 +62,30 @@ def _to_screen(x, y):
     return b['X'] + x * b['Width'] / iw, b['Y'] + y * b['Height'] / ih
 
 
+def check_draw_screen():
+    """Raise unless Revolut's card draw screen is showing: card with its dotted boundary
+    and the pencil (draw mode) button. Drawing blind once put strokes on the iPhone
+    passcode keypad after it locked, so never draw without this."""
+    import cv2
+    from detect_drawing_area import find_card_region, iphone_dot_lines
+    path = '/tmp/revodraw_guard.png'
+    w = _window()
+    subprocess.run(['screencapture', '-x', '-o', '-l', str(w['kCGWindowNumber']), path], check=True)
+    img = cv2.imread(path)
+    sc = img.shape[1] / 326
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    try:
+        x, y, cw, ch = find_card_region(gray)
+        rows, cols = iphone_dot_lines(gray[y:y + ch, x:x + cw], cw, ch)
+    except ValueError:
+        rows, cols = [], []
+    b, g, r = img[int(436 * sc):int(446 * sc), int(158 * sc):int(168 * sc)].reshape(-1, 3).mean(0)
+    pencil = b > 150 and b > r + 30  # light-blue pencil button under the card
+    if len(rows) < 2 or len(cols) < 3 or not pencil:
+        raise RuntimeError("Revolut draw screen not visible (locked phone, app left draw mode, "
+                           "or another screen). Stopped without touching anything.")
+
+
 def _post(kind, x, y):
     ev = Quartz.CGEventCreateMouseEvent(None, kind, (x, y), Quartz.kCGMouseButtonLeft)
     Quartz.CGEventPost(Quartz.kCGHIDEventTap, ev)

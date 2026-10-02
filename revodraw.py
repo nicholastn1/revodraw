@@ -2144,7 +2144,37 @@ def trace_skeleton(skel):
     def is_residue(i):
         path = paths[i]
         return len(set(path)) <= 3 and any(owner.get(n, i) != i for px in path for n in nbrs(px))
-    return [path for i, path in enumerate(paths) if not is_residue(i)]
+    return merge_touching([path for i, path in enumerate(paths) if not is_residue(i)])
+
+
+def merge_touching(paths):
+    """Chain paths whose endpoints touch into one stroke. Junctions split a visually
+    continuous line into pieces, and every extra stroke start is a chance for iOS to drop
+    a bit of line (seen as dashed outlines on the card)."""
+    near = lambda a, b: abs(a[0] - b[0]) <= 2 and abs(a[1] - b[1]) <= 2
+    paths = [list(p) for p in paths]
+    merged = True
+    while merged:
+        merged = False
+        for i in range(len(paths)):
+            for j in range(len(paths)):
+                if i == j or len(paths[i]) < 2 or len(paths[j]) < 2:
+                    continue
+                a, b = paths[i], paths[j]
+                if near(a[-1], b[0]):
+                    paths[i] = a + b
+                elif near(a[-1], b[-1]):
+                    paths[i] = a + b[::-1]
+                elif near(a[0], b[-1]):
+                    paths[i] = b + a
+                elif near(a[0], b[0]):
+                    paths[i] = b[::-1] + a
+                else:
+                    continue
+                paths[j] = []
+                merged = True
+        paths = [p for p in paths if p]
+    return paths
 
 
 def extract_centerline(img, threshold, simplify):
@@ -2403,6 +2433,12 @@ def draw():
 
             for i, path in enumerate(scaled_paths):
                 if IPHONE:
+                    if i % 8 == 0:  # re-check often: the phone can lock or leave draw mode mid-drawing
+                        try:
+                            iphone_mirror.check_draw_screen()
+                        except RuntimeError as e:
+                            yield f"data:{json.dumps({'error': str(e)})}\n\n"
+                            return
                     if not STATE.get('drawing', True):
                         yield f"data:{json.dumps({'message': 'Stopped', 'done': True})}\n\n"
                         return
