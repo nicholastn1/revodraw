@@ -2137,7 +2137,14 @@ def trace_skeleton(skel):
     for p in sorted(on, key=lambda p: len(nbrs(p)) != 1):
         if p not in visited:
             paths.append(walk(p))
-    return paths
+
+    # tiny paths touching another path are skeleton spurs / staircase residue, not strokes;
+    # isolated tiny ones are real dots (eyes) and are kept
+    owner = {px: i for i, path in enumerate(paths) for px in path}
+    def is_residue(i):
+        path = paths[i]
+        return len(set(path)) <= 3 and any(owner.get(n, i) != i for px in path for n in nbrs(px))
+    return [path for i, path in enumerate(paths) if not is_residue(i)]
 
 
 def extract_centerline(img, threshold, simplify):
@@ -2145,14 +2152,11 @@ def extract_centerline(img, threshold, simplify):
     _, binary = cv2.threshold(img, threshold, 255, cv2.THRESH_BINARY_INV)
     paths = []
     for pix in trace_skeleton(skeletonize(binary > 0)):
-        if len(pix) < 4:  # specks
-            continue
         pts = np.array([[x, y] for y, x in pix], np.int32).reshape(-1, 1, 2)
         if simplify > 0:
             pts = cv2.approxPolyDP(pts, simplify, False)
         path = [[int(p[0][0]), int(p[0][1])] for p in pts]
-        if len(path) >= 2:
-            paths.append(path)
+        paths.append(path * 2 if len(path) == 1 else path)  # filled dots (eyes) thin to 1px: draw as a tap
     return paths
 
 
