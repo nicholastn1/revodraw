@@ -17,7 +17,8 @@ STEP_PX = 2.0      # screen points per drag event
 EVENT_DT = 0.02    # seconds between drag events; lower = faster but Mirroring starts dropping strokes
 END_HOLD = 0.05    # rest before lift-off so the stroke's end registers
 DOT_R = 1.5        # radius of the micro-circle that draws a dot
-PREROLL_EVENTS = 4 # 1pt jiggle events at stroke start to absorb iOS drag-recognition latency
+PREROLL_EVENTS = 4 # jiggle events at stroke start to absorb iOS drag-recognition latency
+PREROLL_AMP = 1.0  # jiggle distance (pt), forward along the stroke and back, so it stays on the line
 
 _last = {}  # window bounds + image size from the latest screenshot
 
@@ -79,7 +80,7 @@ def _drag(pts):
     _post(Quartz.kCGEventLeftMouseDown, ax, ay)
     time.sleep(TOUCH_HOLD)
     for i in range(PREROLL_EVENTS):
-        k = 1.0 if i % 2 == 0 else 0.0
+        k = PREROLL_AMP if i % 2 == 0 else 0.0
         _post(Quartz.kCGEventLeftMouseDragged, ax + ux * k, ay + uy * k)
         time.sleep(EVENT_DT)
     for (ax, ay), (bx, by) in zip(pts, pts[1:]):
