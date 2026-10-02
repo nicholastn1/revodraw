@@ -212,6 +212,35 @@ def cluster_lines(lines: List[Tuple[int, float]], min_gap: int = 30) -> List[Tup
     return result
 
 
+def detect_iphone_layout(card_gray, card_w, card_h):
+    """iOS draws the boundary as faint gray dots (~10 levels above the card), which the
+    white-threshold Hough pass misses. Find the dots as tiny local-contrast specks (text
+    strokes are bigger blobs) and read the lines off row/column histograms.
+    Handles both layouts seen so far: top-left logo notch, or whole top band excluded."""
+    diff = card_gray.astype(np.int16) - cv2.medianBlur(card_gray, 15).astype(np.int16)
+    mask = (diff > 7).astype(np.uint8)
+    n, _, st, cen = cv2.connectedComponentsWithStats(mask, 8)
+    dots = [(int(cx), int(cy)) for i, (cx, cy) in enumerate(cen)
+            if i and st[i, cv2.CC_STAT_AREA] <= 6 and st[i, cv2.CC_STAT_WIDTH] <= 3 and st[i, cv2.CC_STAT_HEIGHT] <= 3]
+    rows = [y for y, c in enumerate(np.bincount([d[1] for d in dots], minlength=card_h)) if c >= 5]
+    cols = [x for x, c in enumerate(np.bincount([d[0] for d in dots], minlength=card_w)) if c >= 5]
+    bottom = int(card_h * 0.97)  # no dotted bottom line; boundary is the card edge
+    if len(rows) < 2 or len(cols) < 3:
+        print("Warning: iPhone dotted lines not found, using measured fallback ratios")
+        return (int(card_h * 0.059), bottom, int(card_w * 0.147), int(card_w * 0.928),
+                int(card_w * 0.281), int(card_h * 0.240), int(card_w * 0.611), int(card_h * 0.688))
+    top, visa_top = rows[0], rows[-1]
+    left, right = cols[0], cols[-1]
+    visa_left = min((x for x in cols if x > card_w / 2), default=int(card_w * 0.611))
+    notch_rows = [y for y in rows[1:-1] if y < card_h / 2]
+    notch_cols = [x for x in cols[1:-1] if x < card_w / 2]
+    if notch_rows and notch_cols:
+        top_excl_right, top_excl_bottom = notch_cols[0], notch_rows[0]
+    else:  # no notch: zero-size exclusion at the top-left corner
+        top_excl_right, top_excl_bottom = left, top
+    return top, bottom, left, right, top_excl_right, top_excl_bottom, visa_left, visa_top
+
+
 def detect_boundary(image: np.ndarray, debug: bool = False) -> Optional[DrawingArea]:
     """
     Detect the drawing boundary using pure line detection.
@@ -297,13 +326,8 @@ def detect_boundary(image: np.ndarray, debug: bool = False) -> Optional[DrawingA
     visa_left = visa_left if visa_left is not None else int(card_w * 0.60)
 
     if IPHONE:
-        # ponytail: iOS dotted lines are faint gray-on-gray and the "evolut" text swamps the
-        # Hough pass, so use the layout measured on iPhone (card is cropped on the left, ratios
-        # are of the visible card). Re-measure if Revolut changes the screen or on another model.
-        top, bottom = int(card_h * 0.059), int(card_h * 0.97)
-        left, right = int(card_w * 0.147), int(card_w * 0.928)
-        top_excl_right, top_excl_bottom = int(card_w * 0.281), int(card_h * 0.240)
-        visa_left, visa_top = int(card_w * 0.611), int(card_h * 0.688)
+        top, bottom, left, right, top_excl_right, top_excl_bottom, visa_left, visa_top = \
+            detect_iphone_layout(card_gray, card_w, card_h)
 
     print(f"Detected boundaries:")
     print(f"  Outer: top={top}, bottom={bottom}, left={left}, right={right}")

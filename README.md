@@ -102,7 +102,7 @@ REVODRAW_IPHONE=1 python revodraw.py -p 5050   # port 5000 is taken by AirPlay o
 
 Notes:
 - Don't touch the mouse while it draws (it uses the real cursor).
-- The iOS drawing area is taken from the measured iPhone layout (the dotted lines are too faint to detect). If Revolut changes the screen, re-measure the ratios in `detect_drawing_area.py`.
+- The iOS drawing area is found from the faint dotted boundary (tiny specks, read off row/column histograms). Works for both card layouts seen so far (logo notch, or whole top band excluded).
 - Knobs in `iphone_mirror.py`: raise `TOUCH_HOLD` if stroke starts get cut, `DRAG_STEPS` if lines come out dotted.
 - Brush thickness is Revolut's own slider (right side of the card), not RevoDraw's.
 - For line art use **Centerline**: it draws each line once along its middle. *Contours* traces both edges of every thick line, which the brush merges into blobs.
