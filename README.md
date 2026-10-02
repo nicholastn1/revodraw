@@ -90,6 +90,8 @@ python image_draw.py drawing.png --preview  # Preview without drawing
 
 No ADB on iOS, so iPhone mode drives the macOS **iPhone Mirroring** window instead: it screenshots the window and draws with synthesized mouse drags.
 
+See also [parkerxhollis/revo-draw-ios](https://github.com/parkerxhollis/revo-draw-ios), an earlier standalone project using the same iPhone Mirroring technique, with raster fill (pixel/row) drawing from a color-coded PNG template. This mode instead keeps RevoDraw's vector line tracing and web UI.
+
 1. Open the **iPhone Mirroring** app (macOS 15+) until your iPhone screen shows up.
 2. Give your terminal **Accessibility** and **Screen Recording** permission (System Settings → Privacy & Security).
 3. Open Revolut → customise card → Draw, then run:
